@@ -1,0 +1,111 @@
+library(tidyverse)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(MASS)
+library(sjPlot)
+library (ggplot2)
+
+data <- read.csv("Landing_IAS.csv",encoding = "UTF-8")
+#проверяем понимание текста участниками
+data1 <- data %>%
+  filter(!ACCURACY %in% c(-1)) %>%
+  group_by(RECORDING_SESSION_LABEL) %>%
+  summarise(accuracy = round(mean(ACCURACY), digits = 2),
+            sd = round(sd(ACCURACY), digits = 2),
+            variance = var(ACCURACY))
+#все все поняли, все молодцы 
+data2 <-  data[c("RECORDING_SESSION_LABEL", "TRIAL_INDEX", "IA_FIRST_FIXATION_DURATION", "IA_FIRST_RUN_DWELL_TIME", 
+                "IA_FIRST_RUN_FIXATION_COUNT", "IA_FIRST_RUN_LANDING_POSITION", 
+                "IA_FIXATION_COUNT", "IA_LAST_FIXATION_DURATION", 
+                "IA_LAST_RUN_DWELL_TIME", "IA_LAST_RUN_LANDING_POSITION", "IA_SKIP", 
+                 "IA_SECOND_FIXATION_DURATION", 
+                 "IA_SECOND_RUN_DWELL_TIME", 
+                "IA_SECOND_RUN_FIXATION_COUNT", "IA_SECOND_RUN_LANDING_POSITION", 
+                "IA_THIRD_FIXATION_DURATION","IA_THIRD_RUN_DWELL_TIME", 
+                "IA_THIRD_RUN_FIXATION_COUNT", "IA_THIRD_RUN_LANDING_POSITION", 
+                 "TRIAL_DWELL_TIME", "TRIAL_FIXATION_COUNT", 
+                "cond", "target", "type", "word_length","practice", "sent_num","TRIAL_DWELL_TIME","IA_LABEL",
+                "SHOULD_WE_RECALIBRATE","target_type","frequency_word","frequency_lex")] #сделали новую таблицу с интересующими нас столбцами
+
+new.data <- data2[!grepl('TRUE', data2$practice),] #удалили практику
+target <- new.data[!grepl("UNDEFINED", new.data$cond),]
+target <- target %>%
+  filter(SHOULD_WE_RECALIBRATE != "1")
+
+target <- target %>%
+  filter(target_type == "1")
+  
+
+unique(target$target) #110 слов
+ unique(target$sent_num) #58 пар предложений
+
+unique(target$RECORDING_SESSION_LABEL) #34 участника. Все в порядке, все хорошо, никого не потеряли
+target[target == "."] <- NA
+
+#Здесь начинается что-то страшное
+target <- target %>%
+  mutate(RECORDING_SESSION_LABEL = factor(RECORDING_SESSION_LABEL), 
+         TRIAL_INDEX = factor(TRIAL_INDEX),
+         sent_num = factor (sent_num),
+         target = factor(target),
+         IA_LABEL = factor (IA_LABEL),
+         cond = factor(cond),
+         len.cent = scale(word_length, center = TRUE, scale = F),
+         IA_SKIP = as.numeric(IA_SKIP),
+         IA_FIRST_FIXATION_DURATION = as.numeric(sub(",", ".", IA_FIRST_FIXATION_DURATION)),
+         IA_FIRST_RUN_DWELL_TIME = as.numeric(sub(",", ".", IA_FIRST_RUN_DWELL_TIME)),
+         IA_FIXATION_COUNT = as.numeric(sub(",", ".", IA_FIXATION_COUNT)),
+         IA_FIRST_RUN_FIXATION_COUNT = as.numeric(sub(",", ".", IA_FIRST_RUN_FIXATION_COUNT)),
+         IA_FIRST_RUN_LANDING_POSITION = as.numeric(sub(",", ".", IA_FIRST_RUN_LANDING_POSITION)),
+         IA_LAST_FIXATION_DURATION = as.numeric(sub(",", ".", IA_LAST_FIXATION_DURATION)),
+         IA_LAST_RUN_DWELL_TIME = as.numeric(sub(",", ".", IA_LAST_RUN_DWELL_TIME)),
+         IA_LAST_RUN_LANDING_POSITION = as.numeric((sub(",", ".", IA_LAST_RUN_LANDING_POSITION))
+        ))
+                                                                                                                                                                                                                                        
+
+#first fixation duration 
+full.ffd.t <- target[target$IA_FIXATION_COUNT >= 1 & target$IA_SKIP == 0,] #1864 obs
+ffd.mod <- lmer(log(IA_FIRST_FIXATION_DURATION) ~    
+                    len.cent + cond +
+                  (1 | RECORDING_SESSION_LABEL) + (1 | sent_num)+ IA_FIRST_RUN_LANDING_POSITION,
+                data = full.ffd.t, REML = FALSE,
+                control = lmerControl(optimizer = "bobyqa"))
+
+qqnorm(residuals(ffd.mod))
+summary(ffd.mod) 
+
+#first run landing 
+landing <- target[!is.na(target$IA_FIRST_RUN_LANDING_POSITION),]
+land.mod.f <- lmer(IA_FIRST_RUN_LANDING_POSITION ~    
+                     len.cent + cond +
+                     (1 | RECORDING_SESSION_LABEL) + (1 | sent_num),
+                   data = landing, REML = FALSE,
+                   control = lmerControl(optimizer = "bobyqa"))
+qqnorm(residuals(land.mod.f))
+summary(land.mod.f)
+# gaze duration
+full.gd.t <- target[target$IA_FIRST_RUN_DWELL_TIME != 0 & 
+                       !(is.na(target$IA_FIRST_RUN_DWELL_TIME)),]
+
+gd.mod <- lmer(log(IA_FIRST_RUN_DWELL_TIME) ~    
+                 len.cent + cond +
+                 (1 | RECORDING_SESSION_LABEL) + (1 | sent_num)+
+                 IA_FIRST_RUN_LANDING_POSITION,
+               data = full.gd.t, REML = FALSE,
+               control = lmerControl(optimizer = "bobyqa"))
+
+
+qqnorm(residuals(gd.mod))
+summary(gd.mod)
+#total time
+full.tt.t <- target[target$TRIAL_DWELL_TIME != 0,]
+
+tt.mod <- lmer(log(IA_DWELL_TIME) ~    
+                 logfreq + len.cent + POS_BROAD +
+                 (1 | PARTICIPANT) + (1 | sent_number),  
+               data = full.tt.t, REML = FALSE,
+               control = lmerControl(optimizer = "bobyqa"))
+
+qqnorm(residuals(tt.mod))
+summary(tt.mod)
